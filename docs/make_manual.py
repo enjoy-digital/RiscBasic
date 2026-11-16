@@ -786,6 +786,7 @@ T(['Declaration', 'Meaning'], [
     ['`BIT name = REG.n`', 'A name for one bit.'],
     ['`FIELD name = REG[hi:lo]`', 'A name for a group of bits.'],
     ['`NOT` before `REG.n` or `REG[hi:lo]`', 'Active-low bit or field (section 7.3).'],
+    ['`Get`, `Put`', 'PRINT and INPUT call `SUB devPut` / `FUNCTION devGet` (section 7.5).'],
 ], [5.6, 10.8])
 P('In the program, write `DEVICE.REG`, `DEVICE.BIT` or `DEVICE.REG.n`:')
 CODE('''UART0.DATA = "A"             ' store one byte
@@ -837,6 +838,51 @@ B('Every write goes to the shadow and to the register. Every read, including the
   'hardware resets to another value, write the whole register once at the start.',
   'It appears in the ELF symbol table as `DEVICE.REG.shadow`. `MEM[addr]` access does not use it.',
   '`READONLY` and `WRITEONLY` together are an error.')
+
+H2('Device handlers (Get and Put)')
+P('A device can name its own character routines instead of registers. `PRINT`, `INPUT` and `LINE INPUT` '
+  'on that device then call them, so the console can be anything the program can drive: a bit-banged '
+  'UART, a display, a buffer in RAM, or a real UART with a filter in between.')
+HANDLERS = '''DEVICE CON                       ' no AT needed: the handlers do the work
+  Get                            ' INPUT on CON calls FUNCTION CONGet
+  Put                            ' PRINT on CON calls SUB CONPut(c)
+END DEVICE
+CONSOLE CON
+
+SUB CONPut(c AS BYTE)            ' each character PRINT sends
+  WAIT UNTIL UART0.TXREADY
+  UART0.DATA = c
+END SUB
+
+FUNCTION CONGet AS BYTE          ' the next character for INPUT
+  WAIT UNTIL UART0.RXREADY
+  RETURN UART0.RXDATA
+END FUNCTION'''
+compile_check(HEADER_BAS + '''DEVICE UART0 AT &H4000_1000
+  REG DATA   AT +0 : 8
+  REG STATUS AT +4 READONLY
+  REG RXDATA AT +8 : 8 READONLY
+  BIT TXREADY = STATUS.0
+  BIT RXREADY = STATUS.1
+END DEVICE
+''' + HANDLERS + '''
+DIM v AS WORD
+INPUT "v? ", DEC v
+PRINT "v=", DEC v, 13, 10
+''', 'handlers')
+CODE(HANDLERS)
+B('`Put` needs `SUB devPut(c)` with one parameter. It is called for every character, including the echo '
+  'of `INPUT DEC` / `HEX` and `LINE INPUT`.',
+  '`Get` needs `FUNCTION devGet AS BYTE` without parameters. It waits for the next character and '
+  'returns it.',
+  'The names are the device name followed by `Get` or `Put`. The SUB or FUNCTION can be before or '
+  'after the `DEVICE` block.',
+  'A handler takes the place of the `DATA` / `TXREADY` or `RXDATA` / `RXREADY` registers. With only '
+  'handlers, `AT address` may be left out.',
+  'A handler may print to other devices, but not to its own device: that would call itself forever and '
+  'is a compile error.',
+  'Cost: one runtime routine per handler (66 bytes for `Put` on RV32IC) that saves the registers the '
+  'BASIC code may change.')
 
 # ---- 8 MEM
 H1('Memory access: MEM')
@@ -1156,7 +1202,8 @@ P('`CONSOLE dev` names the device used by `PRINT`, `INPUT` and `LINE INPUT` with
   'It applies to the statements after it and may be given again to switch devices.')
 P('A device used for output must declare a register `DATA` and a bit `TXREADY`. A device used for input '
   'must declare a bit `RXREADY` and a register `RXDATA` (or receive through `DATA`). `NOT` is allowed on '
-  'both bits.')
+  'both bits. Instead of registers, a device can have `Get` and `Put` handlers written in BASIC '
+  '(section 7.5).')
 H2('PRINT')
 CODE('''CONST CR = 13
 CONST LF = 10
@@ -1383,6 +1430,7 @@ KW = [
     ['`EXIT`', 'Statement', 'Leave FOR, DO, WHILE, REPEAT, SUB, FUNCTION', '12.2'],
     ['`FOR` `TO` `STEP` `NEXT`', 'Statement', 'Counted loop', '12.2'],
     ['`FUNCTION` ... `END FUNCTION`', 'Declaration', 'Function with a return value', '13.1'],
+    ['`Get` `Put`', 'In DEVICE', 'Device handlers: INPUT and PRINT call FUNCTION devGet / SUB devPut', '7.5'],
     ['`GOTO`', 'Statement', 'Jump to a label', '12.4'],
     ['`IF` `THEN` `ELSEIF` `ELSE` `END IF`', 'Statement', 'Conditional', '12.1'],
     ['`INPUT`', 'Statement', 'Read a character or number', '15.3'],

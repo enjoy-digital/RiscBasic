@@ -1,0 +1,39 @@
+' 
+' SERV SERVANT SoC with 8K
+'
+
+TARGET RV32I
+CLOCK  100_000_000
+CPI    32
+CODE   AT &H0000 SIZE &H1800
+RAM    AT &H1800 SIZE 2048 
+'
+' AMD IO Module
+'
+DEVICE GPIO0 AT &H4000_0000
+  REG OUT  AT +0  WRITEONLY
+END DEVICE
+
+DEVICE UART0
+  Put       
+'  Get     
+END DEVICE
+
+ALIAS LED = GPIO0.OUT.0
+ALIAS TXD = GPIO0.OUT.0
+
+CONST BitTime = 5
+
+SUB UART0Put(C AS BYTE)
+DIM I AS WORD IN A1
+  TXD = 0 : DELAY_MS BitTime  'Start bit 
+  FOR I = 0 to 7
+    TXD = C.7
+    SHL C 
+  NEXT 
+  TXD = 1 : DELAY_MS BitTime  'Stop bit 
+END SUB
+
+'FUNCTION UART0Get() AS BYTE
+' To make compiler happy
+'END FUNCTION

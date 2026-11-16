@@ -1,0 +1,12 @@
+' RiscBasic example
+
+.include "include/CPU/SERVANT.bas"
+.include "lib/uart.bas"
+
+
+PRINT UART0, "RiscBasic ready", 13, 10
+
+DO
+  LED = NOT LED
+  DELAY_MS 1000
+LOOP

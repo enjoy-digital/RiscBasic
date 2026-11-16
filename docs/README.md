@@ -4,7 +4,7 @@ A BASIC-like language for RISC-V, compiled directly to machine code: single pass
 
 Language design: Antti Lukats (Identor #1). Compiler: Claude (Identor #9). 10 November 2026 (7 AG).
 
-- `RiscBasic-Spec.md`: the language specification (Draft 0.30)
+- `RiscBasic-Spec.md`: the language specification (Draft 0.31)
 - `riscbasic.py`: the compiler (Python 3, no dependencies)
 - `rbsim.py`: a small RV32I/M/C/Zbb simulator used for testing
 - `mem2elf.py`: converts a `.mem` file into an ELF executable
@@ -98,7 +98,7 @@ Steps over all test programs (RV32IC): branch shrinking saved 3.3%, runtime call
 
 ## Status and differences from the spec
 
-Implemented: everything in Draft 0.30 sections 2–11, including active-low `NOT` bits and fields (3.2.1), except for the points below.
+Implemented: everything in Draft 0.31 sections 2–11, including active-low `NOT` bits and fields (3.2.1), except for the points below.
 
 1. **Compressed instructions**: see above.
 2. **Recursion.** Parameters and `DIM` inside a SUB are not saved across a recursive call (locals are static RAM). Recursion works only if the SUB does not need its parameters after the recursive call.
@@ -119,4 +119,5 @@ Implemented: everything in Draft 0.30 sections 2–11, including active-low `NOT
 - RAM variables are addressed relative to `GP = RAM base + 2048`, so the first 4 KB of RAM are one instruction away.
 - `DEC` uses a power-of-ten table, so it needs no multiply or divide.
 - Array start values (v0.37): `CONST` tables are data after the program, read with `%hi` / `%lo` of their label. `DIM` arrays with start values get an entry (byte count, RAM address, bytes) in `__dinit_tab`; the startup code calls `__dinit` once, after clearing RAM, to copy them byte by byte (42 bytes of code on RV32IC, plus 8 bytes per array and the values).
+- Device handlers (v0.38): `Get` / `Put` in a `DEVICE` block make `__getc_dev` / `__putc_dev` a wrapper that saves `ra`, `t0`-`t2`, `a0`-`a7` (RV32E: `a0`-`a5`) and, for `Put`, `s0`, moves the character between `s0` and `a0`, and calls `FUNCTION devGet` / `SUB devPut`. The other print and input routines are unchanged. 66 bytes for `Put` on RV32IC.
 - Interrupts: one dispatcher at `mtvec` saves the caller-saved registers, reads `mcause` and calls the matching `ON IRQ` block. It returns without `mret` (return address in `TP`, set `MIE`, `jr tp`), because some cores, such as the MicroBlaze V MCS, execute `mret` as a no-op; `TP` is reserved in programs with `ON IRQ`.

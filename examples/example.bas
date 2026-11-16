@@ -1,7 +1,6 @@
 ' RiscBasic example
 
 .include "include/CPU/MCS-V.bas"
-'.include "include/CPU/CH32V003.bas"
 .include "include/boards/CR00107.bas"
 .include "lib/uart.bas"
 

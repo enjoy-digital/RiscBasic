@@ -6,7 +6,7 @@
 """
 RiscBasic compiler v0.35
 (v0.2: compressed instructions for RV32IC / RV32EC; v0.3: branch shrinking and far branches;
- v0.4: NOT bits and fields, runtime calls through RA; v0.5: temporaries in x8-x15; v0.6: ELF output; v0.7: PRINT without automatic line end, character constants; v0.8: DWARF line info; v0.9: CONSOLE; v0.10: CHR in PRINT; v0.11: INPUT; v0.12: LINE INPUT; v0.13: PRINT of BYTE buffers; v0.14: WRITEONLY registers with shadow; v0.15: REPEAT ... UNTIL; v0.16: CASE ranges; v0.17: CASE IS; v0.18: single-line ELSE binds to the nearest IF; v0.19: ':' separator; v0.20: strings; v0.21: LEN and string comparison; v0.22: LEFT$ RIGHT$ MID$ INSTR; v0.23: VAL; v0.24: .include; v0.25: #IF conditional compilation; v0.26: MEM[addr]; v0.27: SUB BoardInit; v0.28: LUI reuse; v0.29: MEM field writes via a variable address without the stack; v0.30: bit and field assignment to array elements; v0.31: array element fields without the stack; v0.32: MEM field writes with the shift merge; v0.33: constant moved to the right of commutative operators; v0.34: startup disables interrupts; v0.35: interrupt return without mret; v0.36: READ and WRITE with procedure items, last call argument without the stack; v0.37: array start values and CONST tables)
+ v0.4: NOT bits and fields, runtime calls through RA; v0.5: temporaries in x8-x15; v0.6: ELF output; v0.7: PRINT without automatic line end, character constants; v0.8: DWARF line info; v0.9: CONSOLE; v0.10: CHR in PRINT; v0.11: INPUT; v0.12: LINE INPUT; v0.13: PRINT of BYTE buffers; v0.14: WRITEONLY registers with shadow; v0.15: REPEAT ... UNTIL; v0.16: CASE ranges; v0.17: CASE IS; v0.18: single-line ELSE binds to the nearest IF; v0.19: ':' separator; v0.20: strings; v0.21: LEN and string comparison; v0.22: LEFT$ RIGHT$ MID$ INSTR; v0.23: VAL; v0.24: .include; v0.25: #IF conditional compilation; v0.26: MEM[addr]; v0.27: SUB BoardInit; v0.28: LUI reuse; v0.29: MEM field writes via a variable address without the stack; v0.30: bit and field assignment to array elements; v0.31: array element fields without the stack; v0.32: MEM field writes with the shift merge; v0.33: constant moved to the right of commutative operators; v0.34: startup disables interrupts; v0.35: interrupt return without mret; v0.36: READ and WRITE with procedure items, last call argument without the stack; v0.37: array start values and CONST tables; v0.38: Get and Put device handlers)
 
 Compiles RiscBasic (spec: RiscBasic-Spec.md, Draft 0.26) directly to RISC-V
 machine code in a single pass, without a linker.
@@ -26,7 +26,7 @@ import os
 import re
 import sys
 
-VERSION = '0.37'
+VERSION = '0.38'
 HEADER = ('SPDX-License-Identifier: MIT', 'Copyright 7AG (2026) MicroFPGA UG(h)', 'https://github.com/micro-FPGA/RiscBasic')
 
 # ---------------------------------------------------------------- registers
@@ -1113,6 +1113,19 @@ def rt_putc(dev, st_addr, st_ld, bit, data_ofs, data_st, inv=False):
               'lw a0, 0(sp)',
               'addi sp, sp, 4',
               'ret']
+    return '\n'.join(lines), []
+
+
+def rt_handler(name, label, regs, before, after):
+    """Call a device handler (SUB dev.Put / FUNCTION dev.Get) from the runtime: the character
+    routines keep every register but t2, while compiled BASIC code may change all of regs.
+    The handler is passed or returns the character in a0; t1 holds it in the runtime."""
+    n = 4 * len(regs)
+    lines = ['%s:' % name, 'addi sp, sp, -%d' % n]
+    lines += ['sw %s, %d(sp)' % (r, 4 * k) for k, r in enumerate(regs)]
+    lines += before + ['jal ra, %s' % label] + after
+    lines += ['lw %s, %d(sp)' % (r, 4 * k) for k, r in enumerate(regs)]
+    lines += ['addi sp, sp, %d' % n, 'ret']
     return '\n'.join(lines), []
 
 
@@ -3688,9 +3701,11 @@ class Compiler:
     def st_device(self):
         u = self.expect_id().up
         self.check_newname(u)
-        self.expect_kw('AT')
-        base = self.const_expr()
-        self.in_device = {'name': u, 'base': base, 'regs': {}, 'bits': {}}
+        base = None                   # a device with only Get / Put handlers needs no address
+        if not self.at_end():
+            self.expect_kw('AT')
+            base = self.const_expr()
+        self.in_device = {'name': u, 'base': base, 'regs': {}, 'bits': {}, 'handlers': {}}
 
     def device_line(self, toks):
         self.t, self.i = toks, 0
@@ -3700,7 +3715,11 @@ class Compiler:
             self.expect_kw('DEVICE')
             self.devices[d['name']] = d
             self.in_device = None
+        elif kw in ('GET', 'PUT'):
+            self.device_handler(d, kw)
         elif kw == 'REG':
+            if d['base'] is None:
+                raise RBError('REG needs a device address: DEVICE %s AT address' % d['name'])
             name = self.expect_id().up
             self.expect_kw('AT')
             ofs = self.const_expr()
@@ -3755,8 +3774,25 @@ class Compiler:
             o.inv = inv
             d['bits'][name] = o
         else:
-            raise RBError("REG, BIT, FIELD or END DEVICE expected, found '%s'" % kw)
+            raise RBError("REG, BIT, FIELD, GET, PUT or END DEVICE expected, found '%s'" % kw)
         self.expect_end()
+
+    def device_handler(self, d, kw):
+        """Get / Put in a DEVICE block: PRINT and INPUT on the device call FUNCTION <dev>Get
+        (returns the next character) and SUB <dev>Put(c) instead of using its registers."""
+        dn = d['name']
+        if kw in d['handlers']:
+            raise RBError('device %s: %s given twice' % (dn, kw.capitalize()))
+        name = dn + kw
+        f = self.funcs.get(name)
+        if kw == 'PUT':
+            if f is None or f['kind'] != 'SUB' or len(f['params']) != 1 or f['params'][0][1] == 'STRING':
+                raise RBError('device %s: Put needs SUB %sPut(c AS BYTE), called with each character'
+                              % (dn, dn))
+        elif f is None or f['kind'] != 'FUNCTION' or f['params'] or f['str']:
+            raise RBError('device %s: Get needs FUNCTION %sGet AS BYTE, without parameters, '
+                          'returning the next character' % (dn, dn))
+        d['handlers'][kw] = name
 
     # assignment and commands
 
@@ -4707,7 +4743,7 @@ class Compiler:
                 self.emit_sub_call(t, '__putmid_' + dn)
             elif kind == 'chr':
                 self.gen(t[1], T1, True)
-                if self.devices[dn]['regs']['DATA'].width > 8:
+                if self.wide_char(dn):
                     em.ins('andi', T1, T1, 255)
                 em.ins('jal', RA, '__putc_' + dn)
             elif kind == 'dec':
@@ -4726,8 +4762,21 @@ class Compiler:
         dev = self.devices.get(dn)
         if dev is None:
             raise RBError("'%s' is not a device" % dn)
-        if 'DATA' not in dev['regs'] or 'TXREADY' not in dev['bits']:
-            raise RBError('device %s needs REG DATA and BIT TXREADY for PRINT' % dn)
+        self.check_not_handler(dn, 'PRINT')
+        if not self.can_print(dn):
+            raise RBError('device %s needs REG DATA and BIT TXREADY, or a Put handler, for PRINT' % dn)
+
+    def check_not_handler(self, dn, stmt):
+        """PRINT / INPUT on a device inside its own Get / Put handler would call itself forever."""
+        f = self.cur_func
+        if f is not None and f['name'] in self.devices[dn]['handlers'].values():
+            raise RBError('%s on %s inside its handler %s would call itself: use the device '
+                          'registers there' % (stmt, dn, f['name']))
+
+    def wide_char(self, dn):
+        """True if a character sent to dn must be masked to its low byte first."""
+        dev = self.devices[dn]
+        return 'PUT' in dev['handlers'] or dev['regs']['DATA'].width > 8
 
     def device_arg(self, stmt):
         """Device of a PRINT / INPUT statement: an explicit device name followed by ',' or the
@@ -4747,15 +4796,19 @@ class Compiler:
         dev = self.devices.get(dn)
         if dev is None:
             raise RBError("'%s' is not a device" % dn)
+        self.check_not_handler(dn, 'INPUT')
+        if 'GET' in dev['handlers']:
+            return
         if 'RXREADY' not in dev['bits'] or not ('RXDATA' in dev['regs'] or 'DATA' in dev['regs']):
-            raise RBError('device %s needs BIT RXREADY and REG RXDATA (or DATA) for INPUT' % dn)
+            raise RBError('device %s needs BIT RXREADY and REG RXDATA (or DATA), or a Get handler, '
+                          'for INPUT' % dn)
         rdy = dev['bits']['RXREADY']
         if rdy.w != 1:
             raise RBError('device %s: RXREADY must be a single bit' % dn)
 
     def can_print(self, dn):
         dev = self.devices[dn]
-        return 'DATA' in dev['regs'] and 'TXREADY' in dev['bits']
+        return 'PUT' in dev['handlers'] or ('DATA' in dev['regs'] and 'TXREADY' in dev['bits'])
 
     def st_input(self):
         """INPUT [dev,] item, ...
@@ -4781,7 +4834,7 @@ class Compiler:
             if tok.kind == 'str':
                 self.i += 1
                 if not self.can_print(dn):
-                    raise RBError('INPUT prompt needs a device that can transmit (DATA and TXREADY)')
+                    raise RBError('INPUT prompt needs a device that can transmit (DATA and TXREADY, or a Put handler)')
                 bad = [ch for ch in tok.val if ord(ch) > 255]
                 if bad:
                     raise RBError("INPUT: character '%s' is not in the 8-bit character set" % bad[0])
@@ -4820,7 +4873,7 @@ class Compiler:
         while self.peek().kind == 'str':
             tok = self.next()
             if not self.can_print(dn):
-                raise RBError('LINE INPUT prompt needs a device that can transmit (DATA and TXREADY)')
+                raise RBError('LINE INPUT prompt needs a device that can transmit (DATA and TXREADY, or a Put handler)')
             bad = [ch for ch in tok.val if ord(ch) > 255]
             if bad:
                 raise RBError("LINE INPUT: character '%s' is not in the 8-bit character set" % bad[0])
@@ -4968,8 +5021,7 @@ class Compiler:
                 self.print_chars(dn, run)
                 run = []
                 self.gen(n, T1, True)
-                data = self.devices[dn]['regs']['DATA']
-                if data.width > 8 and not (n.k == 'obj' and n.width <= 8 and not n.signed):
+                if self.wide_char(dn) and not (n.k == 'obj' and n.width <= 8 and not n.signed):
                     em.ins('andi', T1, T1, 255)       # only the low byte is a character
                 em.ins('jal', RA, '__putc_' + dn)
             elif self.accept_kw('DEC'):
@@ -5045,6 +5097,17 @@ class Compiler:
             return {'__sapp_str': rt_sapp_str, '__sapp_dec': rt_sapp_dec, '__sapp_hex': rt_sapp_hex}[name]()
         kind, dn = name[2:].split('_', 1)
         dev = self.devices[dn]
+        hs = dev['handlers']
+        if kind in ('getc', 'putc') and kind[:3].upper() in hs:
+            f = self.funcs[hs[kind[:3].upper()]]
+            # x5-x7 by number: in runtime text t1 / t2 stand for the compiler temporaries s0 / s1
+            regs = ['ra', 'x5', 'x6', 'x7', 'a0', 'a1', 'a2', 'a3', 'a4', 'a5']
+            if 'E' not in self.ext:
+                regs += ['a6', 'a7']
+            if kind == 'putc':
+                return rt_handler(name, f['label'], regs + ['t1'], ['mv a0, t1'], [])
+            return rt_handler(name, f['label'], regs, [],
+                              ['mv t1, a0'] + (['andi t1, t1, 255'] if f['width'] > 8 else []))
         if kind == 'getc':
             rdy = dev['bits']['RXREADY']
             data = dev['regs'].get('RXDATA') or dev['regs']['DATA']

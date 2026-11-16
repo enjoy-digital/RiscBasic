@@ -1,6 +1,6 @@
 # RiscBasic — Language Specification
 
-**Draft 0.30** — 16 November 2026 (7 AG)
+**Draft 0.31** — 16 November 2026 (7 AG)
 Language design: Antti Lukats (Identor #1). Drafting: Claude (Identor #9).
 
 ---
@@ -194,6 +194,36 @@ PRINT HEX GPIO.OUT         ' reads the shadow, not the hardware
 - The shadow starts at 0 (RAM is cleared at startup). If the hardware resets to another value, write the whole register once at the start of the program.
 - Raw `MEM[addr]` access does not use the shadow.
 - `READONLY` and `WRITEONLY` together are an error.
+
+### 3.2.3 Device handlers (Get and Put)
+
+A device can name its own character routines instead of registers. `PRINT`, `INPUT` and `LINE INPUT` on that device then call them, so a console can be anything the program can drive: a bit-banged UART, a display, a buffer in RAM, or a real UART with a filter in between.
+
+```basic
+DEVICE CON                       ' no AT needed: the handlers do the work
+  Get                            ' INPUT on CON calls FUNCTION CONGet
+  Put                            ' PRINT on CON calls SUB CONPut(c)
+END DEVICE
+CONSOLE CON
+
+SUB CONPut(c AS BYTE)            ' each character PRINT sends
+  WAIT UNTIL UART0.TXREADY
+  UART0.DATA = c
+END SUB
+
+FUNCTION CONGet AS BYTE          ' the next character for INPUT
+  WAIT UNTIL UART0.RXREADY
+  RETURN UART0.RXDATA
+END FUNCTION
+```
+
+- `Put` needs `SUB devPut(c)` with one parameter (not `STRING`). It is called once for every character, including the echo of `INPUT DEC` / `HEX` and `LINE INPUT`, and gets the character (0–255) as `c`.
+- `Get` needs `FUNCTION devGet AS BYTE` without parameters. It waits for the next character and returns it. A wider return type is masked to 8 bits.
+- The names are the device name followed by `Get` or `Put`. The SUB or FUNCTION can be anywhere in the program, before or after the `DEVICE` block.
+- A device with `Put` can be used by `PRINT` and `CONSOLE`; a device with `Get` by `INPUT` and `LINE INPUT`. A handler takes the place of the `DATA` / `TXREADY` or `RXDATA` / `RXREADY` registers; a device may have both, and the handler wins.
+- With only handlers, `AT address` may be left out. `REG` then is an error.
+- The handlers are ordinary BASIC code. They may `PRINT` to or `INPUT` from other devices, but not to or from their own device: that would call itself forever and is a compile error.
+- Cost: one runtime routine per handler (66 bytes for `Put` on RV32IC) that saves the registers the BASIC code may change, then calls the handler. The print and input routines are the same as for a register device.
 
 ### 3.3 Variables
 
@@ -453,7 +483,7 @@ PRINT UART1, "to the other UART", CR, LF
 - `PRINT dev, items` sends to `dev`. `PRINT items` sends to the **console**: the device named in the last `CONSOLE` declaration before the `PRINT`. Without a `CONSOLE` declaration, a `PRINT` without a device is an error.
 - `CONSOLE dev` may appear more than once; each applies to the `PRINT` statements after it.
 - A device name directly after `PRINT`, followed by `,` or the end of the line, selects the device. Anything else is the first item.
-- The device must declare a register `DATA` and a bit `TXREADY`.
+- The device must declare a register `DATA` and a bit `TXREADY`, or a `Put` handler (section 3.2.3).
 - Items, separated by `,` (or `;`): string constants, character constants, `CHR expr`, `HEX expr`, `DEC expr`, and `BYTE` array names. Nothing else.
 - A **`BYTE` array name** without an index prints the array as zero-terminated text, as filled by `LINE INPUT`: `PRINT "Hello, ", name`. Printing stops at the first 0 or at the end of the array, so an array without a 0 never prints past its end. Other array types are an error.
 - **No line end is added.** Write `13, 10` (or `CR, LF`) where a line should end.
@@ -480,7 +510,7 @@ INPUT UART1, HEX addr           ' explicit device, hexadecimal number
 IF UART0.RXREADY THEN INPUT CHR c   ' only if a character is waiting
 ```
 
-- The device must declare `BIT RXREADY` (`NOT` allowed) and `REG RXDATA`, or receive through `REG DATA` when it has no separate receive register.
+- The device must declare `BIT RXREADY` (`NOT` allowed) and `REG RXDATA`, or receive through `REG DATA` when it has no separate receive register; or it has a `Get` handler (section 3.2.3).
 - Items, separated by `,`: `"prompt"` (sent before reading; the device must also be able to transmit), `CHR target`, `DEC target`, `HEX target`.
 - `CHR` waits for one character and stores it (0–255). No echo.
 - `DEC` reads an optional `-` and decimal digits; `HEX` reads hex digits `0`–`9`, `A`–`F`, `a`–`f`. Both echo the characters they accept if the device can transmit. The first other character (Enter, space, comma, ...) ends the number; it is not echoed and not stored. No digits gives 0. Values wrap at 32 bits.
@@ -680,7 +710,8 @@ LOOP
 | 38 | Interrupt return | No `mret`: restore registers, return address in `TP`, set `MIE`, `jr tp`; `TP` reserved with `ON IRQ` | 0.28 |
 | 39 | READ and WRITE | `WRITE dev, items` calls `SUB devWrite(item)` once per item; `READ dev, targets` assigns `FUNCTION devRead()` to each target; a lone name `X` with `SUB devX` calls that procedure | 0.29 |
 | 40 | Array start values and CONST tables | `DIM a(n) AS type = v, ...`: RAM, copied at startup; `CONST t(n) AS type = v, ...`: read-only in code memory; `()` takes the size from the values; a line ending in `,` continues | 0.30 |
+| 41 | Device handlers for console IO | `Get` / `Put` lines in a `DEVICE` block: `INPUT` calls `FUNCTION devGet`, `PRINT` calls `SUB devPut(c)`; `AT` optional for a device with only handlers; a handler cannot use its own device | 0.31 |
 
 ## 14. Open questions
 
-None at Draft 0.30.
+None at Draft 0.31.

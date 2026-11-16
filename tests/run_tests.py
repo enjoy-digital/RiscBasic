@@ -152,6 +152,50 @@ PRINT DEC PLAIN.MODE, 13, 10
      '96uart1 96\r\n5\r\n')
 RX['input'] = {0: 'Z-123\r42 7\r1aF0\rxy\x05', 1: '96\r'}
 
+test('device handlers', '''
+DEVICE CON                       ' no registers: Get and Put do the work
+  Get
+  Put
+END DEVICE
+CONSOLE CON
+DIM sent AS WORD
+DIM k AS WORD
+DIM buf(8) AS BYTE
+
+SUB CONPut(c AS BYTE)            ' lower case letters go out in upper case
+  IF c >= 97 AND c <= 122 THEN c = c - 32
+  PRINT UART0, CHR c
+  sent = sent + 1
+END SUB
+
+FUNCTION CONGet AS BYTE          ' '_' comes in as a space
+  DIM c AS BYTE
+  INPUT UART0, CHR c
+  IF c = 95 THEN c = 32
+  RETURN c
+END FUNCTION
+
+SUB Show(a AS WORD, b AS WORD, d AS WORD)    ' a, b and d stay in a0-a2 around each PRINT
+  PRINT "a=", DEC a, " b=", HEX b, " d=", DEC d
+  PRINT " ", DEC a + b + d, 13, 10
+END SUB
+
+PRINT "hello ", DEC 42, " ", HEX &HBEEF, 13, 10
+FOR k = 1 TO 3
+  PRINT DEC k
+NEXT
+k = &H161: PRINT CHR k, 13, 10
+Show 1, &HA, 100
+INPUT "num? ", DEC k
+PRINT " k=", DEC k, 13, 10
+LINE INPUT "line? ", buf
+PRINT 13, 10, "[", buf, "]", 13, 10
+PRINT UART0, DEC sent, 13, 10
+''', 'HELLO 42 0000BEEF\r\n123A\r\nA=1 B=0000000A D=100 111\r\nNUM? 77 K=77\r\nLINE? A BCX\x08 \x08\r\n'
+     '[A BC]\r\n89\r\n',       # 89 characters went through CONPut
+     targets=('RV32I', 'RV32I+M', 'RV32IC', 'RV32IC+M', 'RV32E', 'RV32EC'))
+RX['device handlers'] = {0: '77\ra_bcx\x08\r'}
+
 test('line input', '''
 CONSOLE UART0
 DIM name(8) AS BYTE
@@ -1286,6 +1330,26 @@ def make_compiler(name, body):
 
 
 ERRORS = [
+    ('DEVICE D' + chr(10) + 'Put' + chr(10) + 'END DEVICE', 'device D: Put needs SUB DPut(c AS BYTE)'),
+    ('SUB DPut' + chr(10) + 'END SUB' + chr(10) + 'DEVICE D' + chr(10) + 'Put' + chr(10) + 'END DEVICE',
+     'device D: Put needs SUB DPut(c AS BYTE)'),
+    ('SUB DGet' + chr(10) + 'END SUB' + chr(10) + 'DEVICE D' + chr(10) + 'Get' + chr(10) + 'END DEVICE',
+     'device D: Get needs FUNCTION DGet AS BYTE'),
+    ('FUNCTION DGet(x AS BYTE) AS BYTE' + chr(10) + 'RETURN x' + chr(10) + 'END FUNCTION' + chr(10) +
+     'DEVICE D' + chr(10) + 'Get' + chr(10) + 'END DEVICE', 'device D: Get needs FUNCTION DGet AS BYTE'),
+    ('SUB DPut(c AS BYTE)' + chr(10) + 'END SUB' + chr(10) + 'DEVICE D' + chr(10) + 'Put' + chr(10) +
+     'Put' + chr(10) + 'END DEVICE', 'device D: Put given twice'),
+    ('DEVICE D' + chr(10) + 'REG X AT +0' + chr(10) + 'END DEVICE', 'REG needs a device address: DEVICE D AT'),
+    ('DEVICE D' + chr(10) + 'END DEVICE' + chr(10) + 'PRINT D, "x"', 'device D needs REG DATA and BIT TXREADY, or a Put handler'),
+    ('DEVICE D' + chr(10) + 'END DEVICE' + chr(10) + 'INPUT D, CHR R10', 'or a Get handler, for INPUT'),
+    ('DEVICE D' + chr(10) + 'Put' + chr(10) + 'END DEVICE' + chr(10) + 'SUB DPut(c AS BYTE)' + chr(10) +
+     'PRINT D, CHR c' + chr(10) + 'END SUB', 'PRINT on D inside its handler DPUT would call itself'),
+    ('DEVICE D' + chr(10) + 'Get' + chr(10) + 'END DEVICE' + chr(10) + 'FUNCTION DGet AS BYTE' + chr(10) +
+     'INPUT D, CHR R10' + chr(10) + 'RETURN 1' + chr(10) + 'END FUNCTION', 'INPUT on D inside its handler DGET'),
+    ('DEVICE D' + chr(10) + 'Get' + chr(10) + 'END DEVICE' + chr(10) + 'FUNCTION DGet AS BYTE' + chr(10) +
+     'RETURN 65' + chr(10) + 'END FUNCTION' + chr(10) + 'INPUT D, "x", CHR R10',
+     'INPUT prompt needs a device that can transmit'),
+    ('DEVICE D' + chr(10) + 'Send' + chr(10) + 'END DEVICE', "REG, BIT, FIELD, GET, PUT or END DEVICE expected, found 'SEND'"),
     ('CONST t() AS BYTE = 1, 2' + chr(10) + 't(1) = 5', 'T is a CONST table and cannot be changed'),
     ('CONST t() AS BYTE = 1, 2' + chr(10) + 't(R10).3 = 1', 'T is a CONST table'),
     ('CONST t() AS BYTE = 65, 0' + chr(10) + 't = "B"', 'T is a CONST table'),
