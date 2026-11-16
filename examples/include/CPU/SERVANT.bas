@@ -22,16 +22,17 @@ END DEVICE
 ALIAS LED = GPIO0.OUT.0
 ALIAS TXD = GPIO0.OUT.0
 
-CONST BitTime = 5
+CONST BitTime = 5 'TODO calculate some real value!
 
 SUB UART0Put(C AS BYTE)
 DIM I AS WORD IN A1
-  TXD = 0 : DELAY_MS BitTime  'Start bit 
+  TXD = 0 : DELAY_US BitTime  'Start bit 
   FOR I = 0 to 7
     TXD = C.7
     SHL C 
+    DELAY_US BitTime  'Data bit time
   NEXT 
-  TXD = 1 : DELAY_MS BitTime  'Stop bit 
+  TXD = 1 : DELAY_US BitTime  'Stop bit 
 END SUB
 
 'FUNCTION UART0Get() AS BYTE
