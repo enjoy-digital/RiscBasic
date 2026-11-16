@@ -81,6 +81,8 @@ def generate(soc, code='main_ram', ram='sram', target=None, code_size=None,
     w('RAM    AT %s SIZE %d' % (hexlit(memories[ram]['base']), memories[ram]['size']))
     if stack is not None:
         w('STACK  %d' % stack)
+    w('')
+    w('CONST LITEX_CLOCK = %d' % constants['config_clock_frequency'])
 
     # CSR registers, grouped by module. The longest module name that matches wins.
     modules = sorted(soc['csr_bases'], key=len, reverse=True)
@@ -98,6 +100,8 @@ def generate(soc, code='main_ram', ram='sram', target=None, code_size=None,
         dev = RENAME.get(m, re.sub(r'\W', '_', m).upper())
         w('')
         w('CONST LITEX_%s = 1' % dev)
+        if m + '_interrupt' in constants:  # interrupt number of the module in the SoC
+            w('CONST IRQ_%s = %d' % (dev, constants[m + '_interrupt']))
         w('DEVICE %s AT %s' % (dev, hexlit(base)))
         for addr, name, reg in sorted(regs[m]):
             ro = '  READONLY' if reg['type'] == 'ro' else ''

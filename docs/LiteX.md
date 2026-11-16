@@ -14,6 +14,8 @@ Files:
 | `examples/include/boards/TEL0025.bas` | LED names of the Trenz TEL0025 |
 | `examples/litex_hello.bas` | `PRINT`, `INPUT` and LEDs |
 | `examples/litex_delay.bas` | measures `DELAY_MS` with `TIMER0` |
+| `examples/lib/litex_vexriscv_irq.bas` | interrupts on the VexRiscv CPU: `IrqEnable`, `IrqDisable`, `IrqOn`, `IrqOff` |
+| `examples/litex_timer_irq.bas` | `TIMER0` interrupt with `ON IRQ MEXT` |
 
 ## The include file
 
@@ -28,7 +30,8 @@ python tools/litex2bas.py build/<board>/csr.json -o examples/include/CPU/LITEX.b
 It declares `TARGET` (from the CPU: `RV32I+M` for the default VexRiscv), `CLOCK`, `CODE`, `RAM`
 and one `DEVICE` for each module of the SoC: `UART0`, `TIMER0`, `CTRL`, `LEDS`, ... with all its
 registers. For each device a `CONST LITEX_<name>` is defined, to test with
-`#IF DEFINED(LITEX_LEDS)`.
+`#IF DEFINED(LITEX_LEDS)`, and `CONST IRQ_<name>` with its interrupt number if it has one.
+`CONST LITEX_CLOCK` is the clock in Hz.
 
 | Option | Meaning |
 |---|---|
@@ -73,7 +76,7 @@ Needs LiteX, LiteX-Boards, Lattice Radiant and openFPGALoader. `--load` writes t
 not the flash.
 
 ```
-python3 -m litex_boards.targets.trenz_tel0025 --build --load --csr-json=build/tel0025/csr.json --output-dir=build/tel0025
+python3 -m litex_boards.targets.trenz_tel0025 --build --load --integrated-main-ram-size=0x10000 --csr-json=build/tel0025/csr.json --output-dir=build/tel0025
 python tools/litex2bas.py build/tel0025/csr.json -o examples/include/CPU/LITEX.bas
 python source/riscbasic.py examples/litex_hello.bas
 litex_term /dev/ttyUSBx --kernel=examples/litex_hello.bin --kernel-adr=0x40000000
@@ -83,6 +86,11 @@ litex_term /dev/ttyUSBx --kernel=examples/litex_hello.bin --kernel-adr=0x4000000
 `serialboot` at the BIOS prompt. A new program needs only the last two lines, not a new FPGA
 build; load the FPGA again to get back to the BIOS.
 
+`--integrated-main-ram-size=0x10000` gives 64 KB of main RAM inside the FPGA, enough for any
+RiscBasic program. Without it the main RAM is the 32 MB HyperRAM of the board; programs ran
+from it too, but in a later test the HyperRAM failed the memory test of the BIOS (`Memtest KO`)
+and no program started. Check the BIOS messages if a program does not start.
+
 On the TEL0025 the FT2232H has the console on channel A and JTAG on channel B. If `--load` does
 not find the FPGA, load with `openFPGALoader -c ft2232_b build/tel0025/gateware/trenz_tel0025.bit`.
 
@@ -91,10 +99,44 @@ Program in the ROM, without the BIOS (one FPGA build for each program):
 ```
 python tools/litex2bas.py build/tel0025/csr.json --code rom -o examples/include/CPU/LITEX.bas
 python source/riscbasic.py examples/litex_hello.bas
-python3 -m litex_boards.targets.trenz_tel0025 --build --load --integrated-rom-init=examples/litex_hello.bin --output-dir=build/tel0025_rom
+python3 -m litex_boards.targets.trenz_tel0025 --build --load --integrated-main-ram-size=0x10000 --integrated-rom-init=examples/litex_hello.bin --output-dir=build/tel0025_rom
 ```
 
 Other boards work the same way with their own LiteX target.
+
+## Interrupts (VexRiscv)
+
+`ON IRQ` works on LiteX with the default VexRiscv CPU without a change to the compiler:
+VexRiscv has `mtvec`, `mepc`, `mcause` and `mstatus` as in the RISC-V standard, and the
+interrupt return of RiscBasic without `mret` (specification, section 7) works on it.
+
+All interrupts of the SoC (timer, UART, ...) arrive as the machine external interrupt, so a
+program has one handler, `ON IRQ MEXT`, that tests the `EV_PENDING` register of each module.
+Three switches must be on:
+
+```basic
+.include "lib/litex_vexriscv_irq.bas"
+
+ON IRQ MEXT
+  IF TIMER0.EV_PENDING.0 THEN
+    TIMER0.EV_PENDING = 1        ' clear the event first
+    ticks = ticks + 1
+  END IF
+END IRQ
+
+TIMER0.EV_ENABLE = 1             ' 1: the module raises its interrupt
+IrqEnable IRQ_TIMER0             ' 2: VexRiscv lets this interrupt through (its CSR 0xBC0)
+IrqOn                            ' 3: mie.MEIE and mstatus.MIE
+```
+
+`examples/litex_timer_irq.bas` is the complete program: 100 interrupts per second from
+`TIMER0`, uptime printed once per second (`-D TICK_HZ=10000` for another rate). Tested in
+`litex_sim` and on the TEL0025: 10 s of uptime in 10.00 s, and 10000 interrupts per second for
+30 s while the main program prints.
+
+`lib/litex_vexriscv_irq.bas` is for VexRiscv only. Other LiteX CPUs enable their interrupts in
+another way (PicoRV32 has its own instructions; SERV in LiteX has no interrupts); they are
+not tested.
 
 ## Notes
 
@@ -104,4 +146,3 @@ Other boards work the same way with their own LiteX target.
   loop, where the compiler counts 2. This would be `CPI 1.5`; `CPI` is a whole number, so with
   the default (`CPI 1`) a delay is 1.5 times too long (measured on the TEL0025 with
   `examples/litex_delay.bas`: `DELAY_MS 100` takes 150 ms). `TIMER0` gives exact times.
-- Interrupts (`ON IRQ`) are not tested on LiteX.

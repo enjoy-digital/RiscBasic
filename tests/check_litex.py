@@ -24,7 +24,13 @@ import litex2bas               # noqa: E402
 PROGRAM = '''
 .include "LITEX.bas"
 .include "%s"
+.include "%s"
 DIM c AS BYTE
+ON IRQ MEXT
+  TIMER0.EV_PENDING = 1
+END IRQ
+IrqEnable IRQ_TIMER0
+IrqOn
 PRINT "hello", CR, LF
 #IF DEFINED(LITEX_LEDS)
 LEDS.OUT = 5
@@ -32,7 +38,8 @@ LEDS.OUT = 5
 TIMER0.EN = 0
 INPUT CHR c
 PRINT HEX TIMER0.UPTIME_CYCLES_W0, CHR c, CR, LF
-''' % os.path.join(ROOT, 'examples', 'lib', 'litex_uart.bas').replace('\\', '/')
+''' % tuple(os.path.join(ROOT, 'examples', 'lib', f).replace('\\', '/')
+            for f in ('litex_uart.bas', 'litex_vexriscv_irq.bas'))
 
 
 def main():
@@ -44,7 +51,8 @@ def main():
         want = ['TARGET RV32I+M', 'CLOCK  1000000', 'CODE   AT %s' % base,
                 'RAM    AT &H1000_0000 SIZE 8192', 'DEVICE UART0 AT &HF000_1800',
                 'BIT TXREADY = NOT TXFULL.0', 'DEVICE LEDS AT &HF000_2000',
-                'REG UPTIME_CYCLES_W1 AT +36', 'REG UPTIME_CYCLES_W0 AT +40']
+                'REG UPTIME_CYCLES_W1 AT +36', 'REG UPTIME_CYCLES_W0 AT +40',
+                'CONST IRQ_TIMER0 = 1', 'CONST IRQ_UART0 = 0', 'CONST LITEX_CLOCK = 1000000']
         missing = [w for w in want if w not in text]
         with tempfile.TemporaryDirectory() as tmp:
             with open(os.path.join(tmp, 'LITEX.bas'), 'w') as f:
