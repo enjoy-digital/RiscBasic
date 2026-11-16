@@ -1,4 +1,4 @@
-' RiscBasic example
+' RiscBasic example for SERV core as SERVANT (one GPO bit only avaiable)
 
 .include "include/CPU/SERVANT.bas"
 .include "lib/uart.bas"
