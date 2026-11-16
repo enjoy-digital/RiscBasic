@@ -13,6 +13,7 @@ Files:
 | `examples/lib/litex_uart.bas` | console on the LiteX UART (`CONSOLE UART0`, `UART0Get`) |
 | `examples/include/boards/TEL0025.bas` | LED names of the Trenz TEL0025 |
 | `examples/litex_hello.bas` | `PRINT`, `INPUT` and LEDs |
+| `examples/litex_delay.bas` | measures `DELAY_MS` with `TIMER0` |
 
 ## The include file
 
@@ -78,9 +79,12 @@ python source/riscbasic.py examples/litex_hello.bas
 litex_term /dev/ttyUSBx --kernel=examples/litex_hello.bin --kernel-adr=0x40000000
 ```
 
-`litex_term` is the console (115200 baud) and sends the image when the BIOS asks for it: press
-the button of the board, or type `reboot` at the BIOS prompt. A new program needs only the last
-two lines, not a new FPGA build.
+`litex_term` is the console (115200 baud) and sends the image when the BIOS asks for it: type
+`serialboot` at the BIOS prompt. A new program needs only the last two lines, not a new FPGA
+build; load the FPGA again to get back to the BIOS.
+
+On the TEL0025 the FT2232H has the console on channel A and JTAG on channel B. If `--load` does
+not find the FPGA, load with `openFPGALoader -c ft2232_b build/tel0025/gateware/trenz_tel0025.bit`.
 
 Program in the ROM, without the BIOS (one FPGA build for each program):
 
@@ -96,6 +100,8 @@ Other boards work the same way with their own LiteX target.
 
 - `CODE` in `main_ram` and variables in `sram`: the BIOS no longer runs when the program has
   started, so its RAM is free.
-- `DELAY_US` / `DELAY_MS` need a `CPI` value for the CPU (`--cpi`); it is not calibrated yet.
-  `TIMER0` gives exact times.
+- `DELAY_US` / `DELAY_MS`: the default VexRiscv takes 3 clock cycles for one pass of the delay
+  loop, where the compiler counts 2. This would be `CPI 1.5`; `CPI` is a whole number, so with
+  the default (`CPI 1`) a delay is 1.5 times too long (measured on the TEL0025 with
+  `examples/litex_delay.bas`: `DELAY_MS 100` takes 150 ms). `TIMER0` gives exact times.
 - Interrupts (`ON IRQ`) are not tested on LiteX.
