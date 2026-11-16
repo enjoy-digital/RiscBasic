@@ -1199,6 +1199,55 @@ WRITE Plain, 1, 2, 3
 PRINT UART0, DEC PLAIN.WIDE, 13, 10
 ''', '10 20 8 96 50 110 7 -3 hi|yo|6\r\n')
 
+test('array start values and CONST tables', '''
+DIM mac(6) AS BYTE = &H00, &H04, &HA3, 1, 2, 3
+DIM w() AS SHALF = -5, 300,
+                   -32768, 32767        ' the list continues after a ','
+DIM pad(5) AS WORD = 7, &HFFFFFFFF
+DIM fl(3) AS BIT = 1, 0, 1
+CONST sine() AS SHALF = 0, 3212, 6393, 9512,
+                        12539, 15446,
+
+                        18204, 20787
+CONST bits(4) AS BYTE = &H81, 2
+CONST big() AS WORD = &H12345678, -1
+CONST txt() AS BYTE = 72, 105, 33, 0
+CONST onoff() AS BIT = 1, 0, 1, 1
+DIM i AS WORD, x AS SWORD
+SUB BoardInit
+  PRINT UART0, HEX mac(2), " "
+END SUB
+SUB Count
+  DIM cnt(1) AS WORD = 41
+  cnt(0) = cnt(0) + 1
+  PRINT UART0, DEC cnt(0), " "
+END SUB
+mac(5) = mac(5) + 1
+FOR i = 0 TO 5
+  PRINT UART0, HEX mac(i)
+NEXT
+PRINT UART0, " "
+FOR i = 0 TO 3
+  x = w(i)
+  PRINT UART0, DEC x, " "
+NEXT
+PRINT UART0, DEC pad(0), " ", HEX pad(1), " ", DEC pad(4), " ", DEC fl(0), DEC fl(1), DEC fl(2), 13, 10
+FOR i = 0 TO 7
+  x = sine(i)
+  PRINT UART0, DEC x, " "
+NEXT
+PRINT UART0, DEC sine(3), " ", DEC bits(0).7, DEC bits(0).0, DEC bits(1).1, DEC bits(3), " "
+PRINT UART0, HEX big(0), " ", HEX big(1), " ", txt, " ", DEC LEN(txt), " "
+FOR i = 0 TO 3
+  PRINT UART0, DEC onoff(i)
+NEXT
+PRINT UART0, " ", DEC bits(i - 3) + sine(i + 3), 13, 10
+Count
+Count
+''', 'A3 0004A3010204 -5 300 -32768 32767 7 FFFFFFFF 0 101\r\n'
+     '0 3212 6393 9512 12539 15446 18204 20787 9512 1110 12345678 FFFFFFFF Hi! 3 1011 20789\r\n'
+     '42 43 ')
+
 test('READ and WRITE procedures', '''
 DIM a AS WORD, n AS WORD
 FUNCTION LcdRead AS WORD
@@ -1237,6 +1286,22 @@ def make_compiler(name, body):
 
 
 ERRORS = [
+    ('CONST t() AS BYTE = 1, 2' + chr(10) + 't(1) = 5', 'T is a CONST table and cannot be changed'),
+    ('CONST t() AS BYTE = 1, 2' + chr(10) + 't(R10).3 = 1', 'T is a CONST table'),
+    ('CONST t() AS BYTE = 65, 0' + chr(10) + 't = "B"', 'T is a CONST table'),
+    ('CONST t() AS BYTE = 65, 0' + chr(10) + 'LINE INPUT UART0, t', 'T is a CONST table'),
+    ('CONST t() AS BYTE = 65, 0' + chr(10) + 'INPUT UART0, DEC t(0)', 'T is a CONST table'),
+    ('CONST t(2) AS BYTE = 1, 2, 3', '3 values for T(2)'),
+    ('CONST t() AS BYTE = 256', 'value 256 does not fit in BYTE'),
+    ('CONST t() AS SBYTE = -129', 'value -129 does not fit in SBYTE'),
+    ('CONST t() AS BIT = 2', 'value 2 does not fit in BIT'),
+    ('CONST t() AS STRING = 1', "unknown type 'STRING' for a CONST table"),
+    ('CONST t() AS BYTE = 1, 2' + chr(10) + 'R10 = t(2)', 'index 2 out of range'),
+    ('DIM x AS WORD = 5', 'start values need an array'),
+    ('DIM a() AS BYTE', 'without a size, give start values'),
+    ('DIM a(2) AS BYTE = 1, 2, 3', '3 values for A(2)'),
+    ('DIM a(2) AS HALF = 65536', 'does not fit in HALF'),
+    ('DIM a(2) AS BYTE = 1,', "ends with ',' on the last line"),
     ('SUB S(val AS BYTE)' + chr(10) + 'END SUB', "parameter 'val' of S: 'VAL' is reserved"),
     ('SUB S(a0)' + chr(10) + 'END SUB', "'A0' is reserved"),
     ('WRITE Nope, 1', 'needs SUB NopeWrite'),

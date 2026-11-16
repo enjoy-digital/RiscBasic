@@ -1,6 +1,6 @@
 # RiscBasic — Language Specification
 
-**Draft 0.29** — 13 November 2026 (7 AG)
+**Draft 0.30** — 16 November 2026 (7 AG)
 Language design: Antti Lukats (Identor #1). Drafting: Claude (Identor #9).
 
 ---
@@ -210,6 +210,34 @@ Types: `BIT`, `BYTE`, `HALF` (16-bit), `WORD` (32-bit), and signed `SBYTE`, `SHA
 - Startup code sets `GP = RAM base + 2048`, so variables in the first 4 KB of RAM are reached with one `LW` / `SW` and a 12-bit offset.
 - `BIT` variables in RAM take one byte each.
 - Bits and fields of variables and array elements can be read and assigned: `flags.3 = 1`, `buf(i)[7:4] = 5`. An assignment is a read-modify-write of the variable or element.
+
+### 3.3.1 Start values and CONST tables
+
+Arrays of every type (`BIT`, `BYTE`, `HALF`, `WORD` and the signed types) can be given values at compile time, in RAM or in code memory.
+
+```basic
+' RAM, writable: the startup code copies the values in
+DIM mac(6) AS BYTE = &H00, &H04, &HA3, 1, 2, 3
+DIM limits(8) AS SHALF = -100, 100          ' limits(2) .. limits(7) start at 0
+
+' code memory, read-only: no RAM, no copy
+CONST sine() AS SHALF = 0, 3212, 6393, 9512,
+                        12539, 15446, 18204, 20787
+
+x = sine(i)                 ' read like any array
+mac(5) = mac(5) + 1
+sine(1) = 5                 ' compile error: SINE is a CONST table
+```
+
+- **`DIM name(n) AS type = v, v, ...`** gives a RAM array start values. The startup code copies them in once, after clearing RAM and before `SUB BoardInit` and `main`. Elements without a value start at 0. A `DIM` with start values inside a SUB is filled once at startup, not on every call: variables declared in a SUB have a fixed RAM address, like all RAM variables.
+- **`CONST name(n) AS type = v, v, ...`** makes a read-only table in code memory, after the program with the strings. It takes no RAM and no startup time. Elements without a value are 0. Reading an element is a `LUI` and a load for a constant index, and a shift, `LUI`, `ADD` and load for a computed one.
+- **Size:** `name()` without a number takes the size from the values. With a size, the list may be shorter (the rest is 0), not longer.
+- **Values** are constant expressions (numbers, `CONST`s, `&H` / `&B` forms, arithmetic). Each must fit the type, signed or unsigned: `BYTE` takes −128 to 255, `HALF` −32768 to 65535, `BIT` 0 or 1.
+- **Long lists:** a line that ends with `,` continues on the next line. Blank and comment lines in between are allowed.
+- In `DIM`, the array with start values must be the last name of the statement. Only arrays take start values: scalar variables and register variables do not.
+- A `CONST` table can be used wherever an array is read: elements, bits and fields of elements, and a `BYTE` table as zero-terminated text in `PRINT` and string expressions (`CONST hello() AS BYTE = 72, 105, 0`). Any write is a compile error: assignment, bit or field assignment, `INPUT`, `READ`, `LINE INPUT`, text assignment.
+- In the ELF file, CONST tables are data objects in the code segment and RAM arrays are objects in `.bss`, both with their names and sizes, so a debugger can show `&sine` or `&mac`. The copy routine is `__dinit`, its data `__dinit_tab`.
+- Reading tables from code memory needs a core whose code memory can also be read as data (a shared or dual-port BRAM, as in the MicroBlaze V MCS). Strings already rely on this.
 
 ### 3.4 Memory access (MEM)
 
@@ -651,7 +679,8 @@ LOOP
 | 37 | Array element bits and fields | `buf(i).n` and `buf(i)[hi:lo]` can be assigned (read-modify-write), with constant or computed index | 0.27 |
 | 38 | Interrupt return | No `mret`: restore registers, return address in `TP`, set `MIE`, `jr tp`; `TP` reserved with `ON IRQ` | 0.28 |
 | 39 | READ and WRITE | `WRITE dev, items` calls `SUB devWrite(item)` once per item; `READ dev, targets` assigns `FUNCTION devRead()` to each target; a lone name `X` with `SUB devX` calls that procedure | 0.29 |
+| 40 | Array start values and CONST tables | `DIM a(n) AS type = v, ...`: RAM, copied at startup; `CONST t(n) AS type = v, ...`: read-only in code memory; `()` takes the size from the values; a line ending in `,` continues | 0.30 |
 
 ## 14. Open questions
 
-None at Draft 0.29.
+None at Draft 0.30.

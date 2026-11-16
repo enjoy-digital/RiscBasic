@@ -6,7 +6,7 @@
 """
 RiscBasic compiler v0.35
 (v0.2: compressed instructions for RV32IC / RV32EC; v0.3: branch shrinking and far branches;
- v0.4: NOT bits and fields, runtime calls through RA; v0.5: temporaries in x8-x15; v0.6: ELF output; v0.7: PRINT without automatic line end, character constants; v0.8: DWARF line info; v0.9: CONSOLE; v0.10: CHR in PRINT; v0.11: INPUT; v0.12: LINE INPUT; v0.13: PRINT of BYTE buffers; v0.14: WRITEONLY registers with shadow; v0.15: REPEAT ... UNTIL; v0.16: CASE ranges; v0.17: CASE IS; v0.18: single-line ELSE binds to the nearest IF; v0.19: ':' separator; v0.20: strings; v0.21: LEN and string comparison; v0.22: LEFT$ RIGHT$ MID$ INSTR; v0.23: VAL; v0.24: .include; v0.25: #IF conditional compilation; v0.26: MEM[addr]; v0.27: SUB BoardInit; v0.28: LUI reuse; v0.29: MEM field writes via a variable address without the stack; v0.30: bit and field assignment to array elements; v0.31: array element fields without the stack; v0.32: MEM field writes with the shift merge; v0.33: constant moved to the right of commutative operators; v0.34: startup disables interrupts; v0.35: interrupt return without mret; v0.36: READ and WRITE with procedure items, last call argument without the stack)
+ v0.4: NOT bits and fields, runtime calls through RA; v0.5: temporaries in x8-x15; v0.6: ELF output; v0.7: PRINT without automatic line end, character constants; v0.8: DWARF line info; v0.9: CONSOLE; v0.10: CHR in PRINT; v0.11: INPUT; v0.12: LINE INPUT; v0.13: PRINT of BYTE buffers; v0.14: WRITEONLY registers with shadow; v0.15: REPEAT ... UNTIL; v0.16: CASE ranges; v0.17: CASE IS; v0.18: single-line ELSE binds to the nearest IF; v0.19: ':' separator; v0.20: strings; v0.21: LEN and string comparison; v0.22: LEFT$ RIGHT$ MID$ INSTR; v0.23: VAL; v0.24: .include; v0.25: #IF conditional compilation; v0.26: MEM[addr]; v0.27: SUB BoardInit; v0.28: LUI reuse; v0.29: MEM field writes via a variable address without the stack; v0.30: bit and field assignment to array elements; v0.31: array element fields without the stack; v0.32: MEM field writes with the shift merge; v0.33: constant moved to the right of commutative operators; v0.34: startup disables interrupts; v0.35: interrupt return without mret; v0.36: READ and WRITE with procedure items, last call argument without the stack; v0.37: array start values and CONST tables)
 
 Compiles RiscBasic (spec: RiscBasic-Spec.md, Draft 0.26) directly to RISC-V
 machine code in a single pass, without a linker.
@@ -26,7 +26,7 @@ import os
 import re
 import sys
 
-VERSION = '0.36'
+VERSION = '0.37'
 HEADER = ('SPDX-License-Identifier: MIT', 'Copyright 7AG (2026) MicroFPGA UG(h)', 'https://github.com/micro-FPGA/RiscBasic')
 
 # ---------------------------------------------------------------- registers
@@ -552,11 +552,12 @@ class Emitter:
         self.nbytes = a - self.base
 
     def target(self, i, symbols):
-        name = self.ref[i]
+        name, _, ofs = self.ref[i].partition('+')         # 'label+8': an element of a CONST table
+        ofs = int(ofs or 0)
         if name in self.labels:
-            return self.addr_at(self.labels[name])
+            return self.addr_at(self.labels[name]) + ofs
         if name in symbols:
-            return symbols[name]
+            return symbols[name] + ofs
         raise RBError("undefined label '%s'" % name, self.iline[i])
 
     def shrinkable(self, i):
@@ -929,6 +930,8 @@ class Obj:
         self.strref = False       # reg only: STRING parameter, a pointer to zero-terminated text
         self.index = None
         self.count = 0
+        self.rom = False          # array / arr only: CONST table in code memory, at label
+        self.label = None
         self.__dict__.update(kw)
 
 
@@ -1819,6 +1822,12 @@ class Compiler:
         self.sb_addr = None       # RAM address of the string builder state (current, end)
         self.scratch = {}         # scratch buffer symbol -> size (main program: __strtmp, FUNCTION f: __tmp_F)
         self.ram_syms = []        # (name, address, size) of RAM variables, for the ELF symbol table
+        self.rom_tables = []      # (array Obj, values) of CONST tables, emitted with the data
+        self.ram_init = []        # (name, address, bytes) of DIM arrays with start values
+        self.has_dinit = False    # prescan: some DIM has start values, so startup calls __dinit
+        self.list_open = False    # a list of start values continues on the next line
+        self.list_spec = None
+        self.list_vals = None
         self.started = False
         self.in_device = None
         self.in_asm = False
@@ -1996,7 +2005,8 @@ class Compiler:
             seg, toks = toks[:j], toks[j + 1:]
             if seg and seg[0].kind == 'id' and seg[0].up == 'REM':
                 break
-            if len(seg) > 1 and seg[0].kind == 'id' and seg[0].up == 'CONST' and seg[1].kind == 'id':
+            if len(seg) > 1 and seg[0].kind == 'id' and seg[0].up == 'CONST' and seg[1].kind == 'id' \
+                    and not (len(seg) > 2 and seg[2].kind == 'op' and seg[2].val == '('):   # not a table
                 self.sub_stmt(seg)
                 self.pre_consts.add((self.fno, self.line, seg[1].up))
 
@@ -2056,6 +2066,8 @@ class Compiler:
             s = strip_comment(raw)
             if re.match(r'^\s*ON\s+IRQ\b', s, re.I):
                 self.has_irq = True
+            if re.search(r'(^|:)\s*DIM\b[^:]*=', s, re.I):
+                self.has_dinit = True
             m = sig_re.match(s)
             if not m:
                 continue
@@ -2108,6 +2120,15 @@ class Compiler:
                 self.in_asm = False
                 return
             asm_line(self.em, raw, _BasicResolver(self))
+            return
+        if self.list_open:                  # more start values of a CONST table or DIM array
+            if raw.strip():
+                self.em.comment(self.src_tag() + raw.strip())
+            toks = lex(strip_comment(raw))
+            if toks:
+                self.t, self.i = toks, 0
+                self.more_values()
+                self.expect_end()
             return
         s = strip_comment(raw)
         toks = lex(s)
@@ -2379,7 +2400,7 @@ class Compiler:
                 if idx.k == 'const' and not 0 <= idx.a < o.count:
                     raise RBError('index %d out of range for %s(%d)' % (idx.a, u, o.count))
                 o = Obj('arr', u, addr=o.addr, width=o.width, signed=o.signed,
-                        isbit=o.isbit, count=o.count, index=idx)
+                        isbit=o.isbit, count=o.count, index=idx, rom=o.rom, label=o.label)
             node = self.obj_node(o)
         elif u in ('MEM', 'MEM8', 'MEM16', 'MEM32'):
             # MEM[addr] is a 32-bit word; MEMn[addr] and MEMn(addr) give the width.
@@ -2547,6 +2568,18 @@ class Compiler:
         """Address of an array element: returns (base reg, offset). Uses dst (and T0)."""
         size = o.width // 8
         idx = o.index
+        if o.rom:                                   # CONST table in code memory: %hi / %lo of its label
+            if idx.k == 'const':
+                sym = '%s+%d' % (o.label, idx.a * size)
+                self.em.ins('lui', T0, ('hi', sym))
+                return T0, ('lo', sym)
+            r = self.gen(idx, dst)
+            if size > 1:
+                self.em.ins('slli', dst, r, size.bit_length() - 1)
+                r = dst
+            self.em.ins('lui', T0, ('hi', o.label))
+            self.em.ins('add', dst, r, T0)
+            return dst, ('lo', o.label)
         if idx.k == 'const':
             return self.addr_base(o.addr + idx.a * size)
         r = self.gen(idx, dst)
@@ -2832,6 +2865,9 @@ class Compiler:
 
     def assign(self, o, n):
         k = o.kind
+        b = o.base if k == 'sub' else o
+        if b.kind == 'arr' and b.rom:
+            raise RBError('%s is a CONST table and cannot be changed' % b.name)
         if k == 'reg':
             self.assign_reg(o, n)
         elif k == 'ram':
@@ -3388,6 +3424,8 @@ class Compiler:
         if self.has_irq:
             em.la(T1, '__trap')
             em.ins('csrrw', ZERO, CSRS['mtvec'], T1)
+        if self.has_dinit:                  # copy the start values of DIM arrays into RAM
+            em.ins('jal', RA, '__dinit')
         f = self.funcs.get('BOARDINIT')
         if f is not None:                   # SUB BoardInit runs before the BASIC program (checked in prescan)
             em.ins('jal', RA, f['label'])
@@ -3461,8 +3499,77 @@ class Compiler:
             self.i = len(self.t)
             return
         self.check_newname(u)
+        if self.isop('('):
+            self.const_table(u)
+            return
         self.expect_op('=')
         self.consts[u] = self.const_expr()
+
+    def const_table(self, u):
+        """CONST name([n]) AS type = v, v, ...: a read-only table in code memory."""
+        if u in self.vars:
+            raise RBError("'%s' is already defined" % u)
+        count = self.array_size()
+        self.expect_kw('AS')
+        typ = self.expect_id().up
+        if typ not in TYPES:
+            raise RBError("unknown type '%s' for a CONST table" % typ)
+        w, sg, isbit = TYPES[typ]
+        self.expect_op('=')
+
+        def done(vals):
+            n = self.fill_count(u, count, vals)
+            o = Obj('array', u, width=w, signed=sg, isbit=isbit, count=n, rom=True, label='c_' + u)
+            self.vars[u] = o
+            self.rom_tables.append((o, vals + [0] * (n - len(vals))))
+        self.init_values(typ, w, isbit, done)
+
+    def array_size(self):
+        """'(n)' or '()': the size, or None when the start values give it."""
+        self.expect_op('(')
+        if self.accept_op(')'):
+            return None
+        n = self.const_expr()
+        self.expect_op(')')
+        if n < 1:
+            raise RBError('array size must be at least 1')
+        return n
+
+    @staticmethod
+    def fill_count(u, count, vals):
+        if count is None:
+            return len(vals)
+        if len(vals) > count:
+            raise RBError('%d values for %s(%d)' % (len(vals), u, count))
+        return count
+
+    def init_values(self, typ, w, isbit, done):
+        """Start values: constants separated by ','. A line that ends with ',' continues on
+        the next line. done(values) runs when the list is complete."""
+        self.list_vals = []
+        self.list_spec = (typ, w, isbit, done)
+        self.more_values()
+
+    def more_values(self):
+        typ, w, isbit, done = self.list_spec
+        while True:
+            v = self.const_expr()
+            lo, hi = (0, 1) if isbit else (-(1 << (w - 1)), (1 << w) - 1)
+            if not lo <= v <= hi:
+                raise RBError('value %d does not fit in %s (%d to %d)' % (v, typ, lo, hi))
+            self.list_vals.append(v & ((1 << w) - 1))
+            if not self.accept_op(','):
+                break
+            if self.at_end():
+                self.list_open = True          # the list continues on the next line
+                return
+        self.list_open = False
+        self.list_spec = None
+        done(self.list_vals)
+
+    @staticmethod
+    def pack(vals, w):
+        return b''.join(v.to_bytes(w // 8, 'little') for v in vals)
 
     def st_alias(self):
         u = self.expect_id().up
@@ -3491,16 +3598,14 @@ class Compiler:
             u = self.expect_id().up
             self.check_newname(u)
             count = None
-            if self.accept_op('('):
-                count = self.const_expr()
-                self.expect_op(')')
-                if count < 1:
-                    raise RBError('array size must be at least 1')
+            paren = self.isop('(')
+            if paren:
+                count = self.array_size()           # None for '()': the start values give it
             typ = 'WORD'
             if self.accept_kw('AS'):
                 typ = self.expect_id().up
                 if typ == 'STRING':
-                    if count:
+                    if paren:
                         raise RBError('use DIM name AS STRING * n, without (n)')
                     self.expect_op('*')
                     n = self.const_expr()
@@ -3521,7 +3626,7 @@ class Compiler:
                     raise RBError("unknown type '%s'" % typ)
             w, sg, isbit = TYPES[typ]
             if self.accept_kw('IN'):
-                if count:
+                if paren:
                     raise RBError('arrays cannot live in a register')
                 rt = self.expect_id()
                 r = BASIC_REGS.get(rt.up)
@@ -3545,6 +3650,13 @@ class Compiler:
                 if self.ram_base is None:
                     raise RBError('RAM must be declared before DIM')
                 size = w // 8
+                if self.accept_op('='):
+                    if not paren:
+                        raise RBError('start values need an array: DIM %s(n) AS %s = v, v, ...' % (u, typ))
+                    self.dim_values(u, count, typ, w, sg, isbit)
+                    return                          # the values end the DIM statement
+                if paren and count is None:
+                    raise RBError('%s(): without a size, give start values (= v, v, ...)' % u)
                 if count:
                     o = Obj('array', u, addr=self.alloc_ram(size * count, size), width=w,
                             signed=sg, isbit=isbit, count=count)
@@ -3555,6 +3667,23 @@ class Compiler:
             (self.scope if self.scope is not None else self.vars)[u] = o
             if not self.accept_op(','):
                 break
+
+    def dim_values(self, u, count, typ, w, sg, isbit):
+        """DIM name([n]) AS type = v, v, ...: a RAM array that the startup code fills (__dinit)."""
+        if not self.has_dinit:
+            raise RBError('DIM with start values must start a statement')
+        scope = self.scope if self.scope is not None else self.vars
+        qual = '%s.%s' % (self.cur_func['name'], u) if self.cur_func else u
+        size = w // 8
+
+        def done(vals):
+            n = self.fill_count(u, count, vals)
+            o = Obj('array', u, addr=self.alloc_ram(size * n, size), width=w,
+                    signed=sg, isbit=isbit, count=n)
+            self.ram_syms.append((qual, o.addr, size * n))
+            scope[u] = o
+            self.ram_init.append((qual, o.addr, self.pack(vals, w), w))    # the rest stays 0
+        self.init_values(typ, w, isbit, done)
 
     def st_device(self):
         u = self.expect_id().up
@@ -3638,6 +3767,8 @@ class Compiler:
             if o is not None and o.strref:
                 raise RBError("STRING parameter '%s' is read-only" % tok.val)
             if o is not None and o.kind == 'array':
+                if o.rom:
+                    raise RBError('%s is a CONST table and cannot be changed' % o.name)
                 if o.width != 8 or o.isbit:
                     raise RBError("text can only be assigned to a STRING or BYTE array, '%s' is not one" % tok.val)
                 self.i += 2
@@ -4254,6 +4385,13 @@ class Compiler:
                 out.append(t)
         return out
 
+    def array_address(self, r, o):
+        """Address of a whole array: a RAM address, or the label of a CONST table."""
+        if o.rom:
+            self.em.la(r, o.label)
+        else:
+            self.em.li(r, o.addr)
+
     def str_address(self, term):
         """Address of a string argument in T1 (or its register): text, buffer, string FUNCTION or parameter."""
         em = self.em
@@ -4265,7 +4403,7 @@ class Compiler:
             em.la(T1, lab)
             return T1
         if kind == 'arr':
-            em.li(T1, term[1].addr)
+            self.array_address(T1, term[1])
             return T1
         if kind == 'call':
             self.gen_call(term[1], term[2], False)
@@ -4499,7 +4637,7 @@ class Compiler:
                 em.la(T1, lab)
                 em.li(T2, -1)
             elif kind == 'arr':
-                em.li(T1, t[1].addr)
+                self.array_address(T1, t[1])
                 em.li(T2, t[1].count)
             elif kind == 'call':
                 self.gen_call(t[1], t[2], False)
@@ -4557,7 +4695,7 @@ class Compiler:
                     buf = self.str_buf(self.funcs[t[1]])
                 else:
                     buf = t[1]
-                em.li(T1, buf.addr)
+                self.array_address(T1, buf)
                 em.li(T2, buf.count)
                 self.need('__putbuf_' + dn)
                 em.ins('jal', RA, '__putbuf_' + dn)
@@ -4693,6 +4831,8 @@ class Compiler:
         buf = self.lookup_var(tok.up)
         if buf is None or buf.kind != 'array' or buf.width != 8 or buf.isbit:
             raise RBError("LINE INPUT needs a BYTE array as buffer, '%s' is not one" % tok.val)
+        if buf.rom:
+            raise RBError('%s is a CONST table and cannot be changed' % buf.name)
         if buf.count < 2:
             raise RBError('LINE INPUT buffer needs room for at least one character and the 0')
         dest = None
@@ -4938,6 +5078,8 @@ class Compiler:
             raise RBError('ASM without END ASM')
         if self.blocks:
             raise RBError('%s block not closed' % self.blocks[-1]['type'])
+        if self.list_open:
+            raise RBError('the list of values ends with \',\' on the last line')
         self.ensure_start()
         em.line = 0                         # end loop, runtime and data have no source line
         em.head('end of program')
@@ -4962,10 +5104,22 @@ class Compiler:
             self.sizes.append(('runtime ' + name, start, em.mark()))
         if self.irq:
             self.emit_trap()
-        if self.strings or '__pow10' in self.rt_needed:
+        if self.has_dinit:
+            self.emit_dinit()
+        if self.strings or '__pow10' in self.rt_needed or self.rom_tables or self.has_dinit:
             em.head('data')
             em.align4()
             start = em.mark()
+            for o, vals in self.rom_tables:
+                em.label(o.label)
+                self.emit_values(self.pack(vals, o.width), o.width)
+            if self.has_dinit:
+                em.label('__dinit_tab')
+                for name, addr, raw, w in self.ram_init:
+                    em.data(len(raw), '.word   %d   ; bytes of %s' % (len(raw), name))
+                    em.data(addr, '.word   0x%08X   ; %s' % (addr, name))
+                    self.emit_values(raw, w)
+                em.data(0, '.word   0   ; end of __dinit_tab')
             for text, lab in self.strings.items():
                 em.label(lab)
                 raw = text.encode('latin-1') + b'\0'
@@ -4996,6 +5150,44 @@ class Compiler:
         self.code_used = em.nbytes
         if self.code_used > self.code_size:
             raise RBError('code overflow: %d bytes > CODE SIZE %d bytes' % (self.code_used, self.code_size))
+
+    def emit_values(self, raw, w):
+        """Table data, padded to whole words; the listing shows the values as .byte / .half / .word."""
+        raw += b'\0' * (-len(raw) % 4)
+        d = {8: '.byte', 16: '.half', 32: '.word'}[w]
+        for j in range(0, len(raw), 4):
+            chunk = raw[j:j + 4]
+            vals = [int.from_bytes(chunk[k:k + w // 8], 'little') for k in range(0, 4, w // 8)]
+            self.em.data(int.from_bytes(chunk, 'little'),
+                         '%-7s %s' % (d, ', '.join('0x%0*X' % (w // 4, v) for v in vals)))
+
+    def emit_dinit(self):
+        """__dinit: copy the start values of DIM arrays from __dinit_tab into RAM. Called once by
+        the startup code, after RAM is cleared. Table entries: byte count, RAM address, bytes
+        (padded to a word); a count of 0 ends the table. Uses s0, s1, a5 and t0, before main."""
+        em = self.em
+        em.head('runtime __dinit')
+        start = em.mark()
+        em.label('__dinit')
+        em.la(T1, '__dinit_tab')
+        em.label('__dinit_next')
+        em.ins('lw', T0, 0, T1)
+        em.ins('beq', T0, ZERO, '__dinit_done')
+        em.ins('lw', T2, 4, T1)
+        em.ins('addi', T1, T1, 8)
+        em.ins('add', T0, T0, T2)               # end of the RAM array
+        em.label('__dinit_copy')
+        em.ins('lbu', 5, 0, T1)
+        em.ins('sb', 5, 0, T2)
+        em.ins('addi', T1, T1, 1)
+        em.ins('addi', T2, T2, 1)
+        em.ins('bne', T2, T0, '__dinit_copy')
+        em.ins('addi', T1, T1, 3)               # the next entry starts on a word
+        em.ins('andi', T1, T1, -4)
+        em.j('__dinit_next')
+        em.label('__dinit_done')
+        em.ins('jalr', ZERO, 0, RA)
+        self.sizes.append(('runtime __dinit', start, em.mark()))
 
     def emit_trap(self):
         em = self.em
@@ -5086,6 +5278,7 @@ class Compiler:
                      'runtime': rest, 'IRQ': '__irq' + rest, 'trap': '__trap', 'data': None}.get(kind)
             if label:
                 sizes[label] = em.addr_at(b) - em.addr_at(a)
+        tables = {o.label: o.count * o.width // 8 for o, _ in self.rom_tables}
         syms = [('$x', em.base, 0, 'notype', 'text')]
         data = next((a for name, a, b in self.sizes if name == 'data'), None)
         if data is not None:
@@ -5100,8 +5293,10 @@ class Compiler:
                 syms.append((label, addr, sizes[label], 'func', 'text'))
             elif label == 'main':
                 syms.append(('main', addr, em.addr_at(self.em.labels['__end']) - addr, 'func', 'text'))
-            elif re.fullmatch(r'__str\d+', label) or label == '__pow10':     # string constants, table
+            elif re.fullmatch(r'__str\d+', label) or label in ('__pow10', '__dinit_tab'):
                 syms.append((label, addr, 0, 'object', 'text'))
+            elif label.startswith('c_') and label in tables:                # CONST tables
+                syms.append((label[2:], addr, tables[label], 'object', 'text'))
             else:
                 syms.append((label, addr, 0, 'notype', 'text'))
         for name, addr, size in self.ram_syms:

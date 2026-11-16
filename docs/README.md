@@ -4,7 +4,7 @@ A BASIC-like language for RISC-V, compiled directly to machine code: single pass
 
 Language design: Antti Lukats (Identor #1). Compiler: Claude (Identor #9). 10 November 2026 (7 AG).
 
-- `RiscBasic-Spec.md`: the language specification (Draft 0.29)
+- `RiscBasic-Spec.md`: the language specification (Draft 0.30)
 - `riscbasic.py`: the compiler (Python 3, no dependencies)
 - `rbsim.py`: a small RV32I/M/C/Zbb simulator used for testing
 - `mem2elf.py`: converts a `.mem` file into an ELF executable
@@ -98,7 +98,7 @@ Steps over all test programs (RV32IC): branch shrinking saved 3.3%, runtime call
 
 ## Status and differences from the spec
 
-Implemented: everything in Draft 0.29 sections 2–11, including active-low `NOT` bits and fields (3.2.1), except for the points below.
+Implemented: everything in Draft 0.30 sections 2–11, including active-low `NOT` bits and fields (3.2.1), except for the points below.
 
 1. **Compressed instructions**: see above.
 2. **Recursion.** Parameters and `DIM` inside a SUB are not saved across a recursive call (locals are static RAM). Recursion works only if the SUB does not need its parameters after the recursive call.
@@ -118,4 +118,5 @@ Implemented: everything in Draft 0.29 sections 2–11, including active-low `NOT
 - Strings are built with a small state block in RAM (`__sbstate`: current position and end). When a string `FUNCTION` is called while another string is being built, the caller saves and restores that state around the call. Overlapping assignments build in a scratch buffer: `__strtmp` for the main program and `__tmp_NAME` for each string FUNCTION, each sized to the largest target it needs.
 - RAM variables are addressed relative to `GP = RAM base + 2048`, so the first 4 KB of RAM are one instruction away.
 - `DEC` uses a power-of-ten table, so it needs no multiply or divide.
+- Array start values (v0.37): `CONST` tables are data after the program, read with `%hi` / `%lo` of their label. `DIM` arrays with start values get an entry (byte count, RAM address, bytes) in `__dinit_tab`; the startup code calls `__dinit` once, after clearing RAM, to copy them byte by byte (42 bytes of code on RV32IC, plus 8 bytes per array and the values).
 - Interrupts: one dispatcher at `mtvec` saves the caller-saved registers, reads `mcause` and calls the matching `ON IRQ` block. It returns without `mret` (return address in `TP`, set `MIE`, `jr tp`), because some cores, such as the MicroBlaze V MCS, execute `mret` as a no-op; `TP` is reserved in programs with `ON IRQ`.

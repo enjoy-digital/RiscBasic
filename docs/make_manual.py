@@ -706,9 +706,9 @@ B('**RAM variables always live in RAM.** Every read is a load and every write is
   'listing is predictable: `count = count + 1` is load, add, store.',
   '**Register variables** (`IN Rn`) always live in their register. They are the fastest form and the '
   'right choice for loop counters and hot values.',
-  'Arrays are in RAM. Elements are numbered from 0; `DIM buf(16)` has `buf(0)` to `buf(15)`. The index '
-  'is not checked at run time.',
-  'All RAM variables start at 0 (startup clears RAM).',
+  'Arrays declared with `DIM` are in RAM. Elements are numbered from 0; `DIM buf(16)` has `buf(0)` to '
+  '`buf(15)`. The index is not checked at run time.',
+  'All RAM variables start at 0 (startup clears RAM), except arrays given start values (section 6.4).',
   'A `DIM` inside a `SUB` or `FUNCTION` creates a variable that only that routine can see. It is a '
   'static RAM variable, not a stack slot (see Appendix C on recursion).')
 H2('Constants: CONST')
@@ -718,6 +718,38 @@ CONST LF = 10
 CONST MASK = (1 SHL 5) OR 1      ' constant expressions are evaluated at compile time''')
 P('A constant has no storage; it is replaced by its value. A constant may not have the name of a '
   '`SUB` or `FUNCTION`.')
+H2('Arrays with start values and CONST tables')
+P('Arrays of every type can be given values at compile time: with `DIM` in RAM (writable), with `CONST` '
+  'in code memory (read-only).')
+CODE('''' RAM, writable: the startup code copies the values in
+DIM mac(6) AS BYTE = &H00, &H04, &HA3, 1, 2, 3
+DIM limits(8) AS SHALF = -100, 100          ' limits(2) .. limits(7) start at 0
+
+' code memory, read-only: no RAM, no copy
+CONST sine() AS SHALF = 0, 3212, 6393, 9512,
+                        12539, 15446, 18204, 20787
+
+x = sine(i)                 ' read like any array
+mac(5) = mac(5) + 1
+sine(1) = 5                 ' compile error: SINE is a CONST table''')
+B('`DIM name(n) AS type = v, v, ...`: a RAM array with start values. The startup code copies them in '
+  'once, after clearing RAM and before `SUB BoardInit` and `main`. A `DIM` with start values inside a '
+  '`SUB` is filled once at startup, not on every call.',
+  '`CONST name(n) AS type = v, v, ...`: a read-only table in code memory, after the program. It takes '
+  'no RAM and no startup time. An element read is `LUI` and a load (constant index), or shift, `LUI`, '
+  '`ADD` and a load (computed index).',
+  '`name()` without a number takes the size from the values. With a size, the list may be shorter (the '
+  'rest is 0), not longer.',
+  'Values are constant expressions and must fit the type, signed or unsigned: `BYTE` −128 to 255, '
+  '`HALF` −32768 to 65535, `BIT` 0 or 1.',
+  'A line that ends with `,` continues on the next line; blank and comment lines in between are allowed.',
+  'In `DIM`, the array with start values must be the last name of the statement. Scalar and register '
+  'variables take no start values.',
+  'A `CONST` table can be read wherever an array can: elements, their bits and fields, and a `BYTE` table '
+  'as zero-terminated text in `PRINT` and string expressions. Every kind of write is a compile error.',
+  'The ELF file names the tables and arrays with their sizes, so a debugger can show `&sine` or `&mac`.',
+  'Tables are read from code memory, so the core must be able to read its code memory as data (shared '
+  'or dual-port BRAM, as in the MicroBlaze V MCS). Strings rely on this too.')
 H2('Aliases: ALIAS')
 CODE('''ALIAS LED     = GPIO.OUT.3
 ALIAS BUTTON  = GPIO.IN.0
@@ -1329,7 +1361,7 @@ KW = [
     ['`.include "file"`', 'Directive', 'Insert another source file', '5.1'],
     ['`#IF` `#ELSEIF` `#ELSE` `#ENDIF`', 'Directive', 'Conditional compilation', '5.2'],
     ['`#ERROR "text"`', 'Directive', 'Stop the compile with a message', '5.2'],
-    ['`ALIAS`', 'Declaration', 'Second name for an object', '6.4'],
+    ['`ALIAS`', 'Declaration', 'Second name for an object', '6.5'],
     ['`AND` `OR` `XOR` `NOT`', 'Operator', 'Bitwise / logical operators', '9.3'],
     ['`ASM` ... `END ASM`', 'Statement', 'Inline assembly', '16'],
     ['`ATOMIC`', 'Statement prefix', 'Assignment with interrupts disabled', '9.2'],
@@ -1342,6 +1374,7 @@ KW = [
     ['`CODE` `RAM` `STACK`', 'Declaration', 'Memory layout', '4.3'],
     ['`CONSOLE`', 'Declaration', 'Default device for PRINT and INPUT', '15.1'],
     ['`CONST`', 'Declaration', 'Named constant', '6.3'],
+    ['`CONST name()`', 'Declaration', 'Read-only table in code memory', '6.4'],
     ['`DELAY_US` `DELAY_MS`', 'Statement', 'Busy-wait delay', '14'],
     ['`DEVICE` ... `END DEVICE`', 'Declaration', 'Memory-mapped peripheral', '7'],
     ['`DIM` ... `AS` ... `IN`', 'Declaration', 'Variable or array', '6.2'],
