@@ -1,4 +1,4 @@
-# License: MIT
+# SPDX-License-Identifier: MIT
 # Copyright 7AG (2026) MicroFPGA UG(h)
 # https://github.com/micro-FPGA/RiscBasic
 #

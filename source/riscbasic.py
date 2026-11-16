@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# License: MIT
+# SPDX-License-Identifier: MIT
 # Copyright 7AG (2026) MicroFPGA UG(h)
 # https://github.com/micro-FPGA/RiscBasic
 
@@ -27,7 +27,7 @@ import re
 import sys
 
 VERSION = '0.36'
-HEADER = ('License: MIT', 'Copyright 7AG (2026) MicroFPGA UG(h)', 'https://github.com/micro-FPGA/RiscBasic')
+HEADER = ('SPDX-License-Identifier: MIT', 'Copyright 7AG (2026) MicroFPGA UG(h)', 'https://github.com/micro-FPGA/RiscBasic')
 
 # ---------------------------------------------------------------- registers
 

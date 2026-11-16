@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# License: MIT
+# SPDX-License-Identifier: MIT
 # Copyright 7AG (2026) MicroFPGA UG(h)
 # https://github.com/micro-FPGA/RiscBasic
 
@@ -1637,6 +1637,8 @@ def main():
     failed += check_constant_left()
     import check_mcsv_fit                  # MicroBlaze V MCS FIT example on an IO Module model
     failed += check_mcsv_fit.main()
+    import check_mac_eeprom                # I2C through READ / WRITE, with a model I2C EEPROM
+    failed += check_mac_eeprom.main()
     failed += check_far_array_fields()
     failed += check_conditionals()
     print('\n%s' % ('all tests passed' if not failed else '%d test(s) failed' % failed))

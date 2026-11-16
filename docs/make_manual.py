@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# License: MIT
+# SPDX-License-Identifier: MIT
 # Copyright 7AG (2026) MicroFPGA UG(h)
 # https://github.com/micro-FPGA/RiscBasic
 
@@ -426,7 +426,7 @@ for line in ('Compiler version %s  ·  Language specification Draft %s' % (VERSI
     runs(doc.add_paragraph(), line, size=11)
 for _ in range(8):
     doc.add_paragraph()
-for line in ('License: MIT', 'Copyright 7AG (2026) MicroFPGA UG(h)', 'https://github.com/micro-FPGA/RiscBasic'):
+for line in ('SPDX-License-Identifier: MIT', 'Copyright 7AG (2026) MicroFPGA UG(h)', 'https://github.com/micro-FPGA/RiscBasic'):
     p = doc.add_paragraph()
     p.paragraph_format.space_after = Pt(0)
     runs(p, line, size=9.5, color=GREY)
@@ -1421,7 +1421,7 @@ print('saved', OUT)
 
 def word_pids():
     out = subprocess.run(['tasklist', '/FI', 'IMAGENAME eq WINWORD.EXE', '/FO', 'CSV', '/NH'],
-                         capture_output=True, text=True).stdout
+                         capture_output=True).stdout.decode('oem', errors='replace')
     return {int(line.split('","')[1]) for line in out.splitlines() if line.startswith('"WINWORD')}
 
 
