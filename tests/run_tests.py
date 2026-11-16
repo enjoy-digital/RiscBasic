@@ -1704,6 +1704,8 @@ def main():
     failed += check_mcsv_fit.main()
     import check_mac_eeprom                # I2C through READ / WRITE, with a model I2C EEPROM
     failed += check_mac_eeprom.main()
+    import check_i2c_detect                # i2cdetect bus scan, several model I2C devices
+    failed += check_i2c_detect.main()
     failed += check_far_array_fields()
     failed += check_conditionals()
     print('\n%s' % ('all tests passed' if not failed else '%d test(s) failed' % failed))
