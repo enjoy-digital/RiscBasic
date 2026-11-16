@@ -4,7 +4,7 @@
 .include "lib/uart.bas"
 
 
-PRINT UART0, "RiscBasic ready", 13, 10
+PRINT UART0, "RiscBasic ready", CR, LF
 
 DO
   LED = NOT LED
