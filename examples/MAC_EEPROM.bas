@@ -10,11 +10,6 @@ DIM J AS BYTE          ' RAM
 DIM I2CAddr AS BYTE    ' RAM
 DIM ackerr AS BYTE      ' RAM: 1 if a device did not acknowledge (GetAck)
 
-DEVICE GPIO1 AT &H8000_0000     ' IO Module GPO2 / GPI2
-  REG OUT  AT +20  WRITEONLY
-  REG IN   AT +36  READONLY
-END DEVICE
-
 '
 ' I2C bitbang defs
 '

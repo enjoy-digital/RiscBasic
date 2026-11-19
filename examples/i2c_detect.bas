@@ -25,11 +25,6 @@ DIM found AS BYTE       ' RAM: devices that answered
 DIM dummy AS BYTE       ' RAM: the byte of a read probe
 DIM ackerr AS BYTE      ' RAM: 1 if a device did not acknowledge (I2CGetAck)
 
-DEVICE GPIO1 AT &H8000_0000     ' IO Module GPO2 / GPI2
-  REG OUT  AT +20  WRITEONLY
-  REG IN   AT +36  READONLY
-END DEVICE
-
 '
 ' I2C bitbang defs: SDA must be open-drain (see lib/i2c_bitbang.bas)
 '
