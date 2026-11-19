@@ -15,6 +15,7 @@ Files:
 | `examples/delay_litex.bas` | measures `DELAY_MS` with `TIMER0` |
 | `examples/include/CPU/LITEX_VEXRISCV_IRQ.bas` | interrupts on the VexRiscv CPU: `IrqEnable`, `IrqDisable`, `IrqOn`, `IrqOff` |
 | `examples/timer_litex.bas` | `TIMER0` interrupt with `ON IRQ MEXT` |
+| `examples/tinybasic_litex.bas` | the Tiny BASIC interpreter (`lib/tinybasic.bas`) on the LiteX console |
 | `tests/check_litex.py` | checks the script and compiles the LiteX examples |
 
 `LITEX.bas` is not in the repository: it belongs to one LiteX build. It is used like the other
@@ -149,6 +150,32 @@ is a module of the SoC and its interrupt is an external interrupt.
 `include/CPU/LITEX_VEXRISCV_IRQ.bas` is for VexRiscv only. Other LiteX CPUs enable their interrupts in
 another way (PicoRV32 has its own instructions; SERV in LiteX has no interrupts); they are
 not tested.
+
+## Tiny BASIC
+
+`examples/tinybasic_litex.bas` is the Tiny BASIC interpreter of `lib/tinybasic.bas` on the LiteX
+console. It needs about 11 KB of code and 5 KB of RAM (4 KB of it for the BASIC program), so it
+fits the 8 KB SRAM of a default LiteX SoC. It is compiled and loaded like the other examples:
+
+```
+python source/riscbasic.py examples/tinybasic_litex.bas
+litex_sim --cpu-type=vexriscv --integrated-main-ram-size=0x10000 --ram-init=examples/tinybasic_litex.bin --output-dir=build/sim
+```
+
+```
+RiscBasic Tiny BASIC, 4020 bytes free
+> 10 FOR I=1 TO 5
+> 20 PRINT I;" squared is ";I*I
+> 30 NEXT I
+> RUN
+1 squared is 1
+...
+5 squared is 25
+OK
+```
+
+Tested in `litex_sim`; not yet on a board. `DELAY` is 1.5 times too long on VexRiscv (see the
+notes).
 
 ## Notes
 

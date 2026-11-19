@@ -15,6 +15,7 @@ A BASIC-like language for RISC-V soft cores, compiled directly to machine code: 
   - [spi_read_id.bas](examples/spi_read_id.bas): reads the JEDEC ID (`9F`) and the manufacturer / device ID (`90`) of an SPI flash with bit-banged SPI
   - [hello_litex.bas](examples/hello_litex.bas): `PRINT` and `INPUT` on a [LiteX](https://github.com/enjoy-digital/litex) SoC, in simulation or on a board (Trenz TEL0025): see [RiscBasic on a LiteX SoC](docs/LiteX.md)
   - [timer_litex.bas](examples/timer_litex.bas): timer interrupt on a LiteX SoC with the VexRiscv CPU
+  - [tinybasic_litex.bas](examples/tinybasic_litex.bas): the Tiny BASIC interpreter on a LiteX SoC
 
 ```
 python source/riscbasic.py program.bas     # writes program.bin .hex .mem .lst .elf
