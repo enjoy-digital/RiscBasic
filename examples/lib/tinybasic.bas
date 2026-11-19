@@ -861,6 +861,8 @@ SUB Exec
         SkipSp
         xc = P(tptr)
         IF xc <> 0 AND xc <> ":" THEN Fail 1
+      ELSE
+        CheckBreak                  ' GOTO, NEXT, ... : loops within one line can be stopped too
       END IF
     END IF
   LOOP
