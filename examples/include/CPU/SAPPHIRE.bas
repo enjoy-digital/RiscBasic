@@ -5,8 +5,18 @@
 TARGET RV32I
 CLOCK  25_000_000
 CPI    3               ' measured on T20 board: delay loop takes 6 cycles per pass
-CODE   AT &HF900_0000 SIZE 14336
-RAM    AT &HF900_3800 SIZE 2048 
+'
+' The on-chip RAM holds code and data. Define these before the include to change the split
+' or the RAM size of the SoC (SYSTEM_RAM_A_SIZE in soc.h).
+'
+#IF NOT DEFINED(SOC_RAM_SIZE)
+CONST SOC_RAM_SIZE = 16384
+#ENDIF
+#IF NOT DEFINED(RAM_SIZE)
+CONST RAM_SIZE = 2048
+#ENDIF
+CODE   AT &HF900_0000 SIZE SOC_RAM_SIZE - RAM_SIZE
+RAM    AT &HF900_0000 + SOC_RAM_SIZE - RAM_SIZE SIZE RAM_SIZE
 
 '
 ' AMD IO Module

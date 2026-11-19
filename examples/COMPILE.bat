@@ -7,6 +7,8 @@ del *.elf
 python ../source/riscbasic.py example.bas
 python ../source/riscbasic.py example_sapphire.bas
 python ../source/riscbasic.py uart_sapphire.bas
+python ../source/riscbasic.py timer_sapphire.bas
+python ../source/riscbasic.py tinybasic_sapphire.bas
 
 python ../source/riscbasic.py fit_interrupt.bas
 python ../source/riscbasic.py MAC_EEPROM.bas
