@@ -514,6 +514,8 @@ P('Connect a terminal program to the UART of the SoC: **115200 baud, 8 data bits
   'no flow control. The terminal must send Enter as CR (most do; CR LF also works, the LF is ignored). '
   'After the start Tiny BASIC prints its banner and the prompt `>`:')
 SESSION('', banner=True)
+NOTE('**On Windows, use Tera Term, not PuTTY.** PuTTY is not good for Tiny BASIC, especially for '
+     'pasting programs. In Tera Term, paste with a **right click** in the terminal window.')
 H2('A first session')
 P('Type a line without a number and it runs at once. `OK` says that it has finished:')
 SESSION('PRINT "Hello from Tiny BASIC"\nPRINT 6*7')
@@ -542,8 +544,10 @@ B('Up to 72 characters per line. Backspace (or DEL) deletes the last character.'
   'A keyword is recognized wherever it starts, so variables can only be one letter.')
 H2('Pasting programs')
 P('A program can be pasted into the terminal as text, one line per program line, for example the demo '
-  '`examples/tinybasic/guess.bas`. There is no flow control: if characters are lost, set a delay of '
-  '10 to 20 ms after each line in the terminal program.')
+  '`examples/tinybasic/guess.bas`. On Windows, use Tera Term and paste with a right click in its '
+  'window (see 2.2). There is no flow control: if characters are lost, set a delay of 10 to 20 ms '
+  'after each line in the terminal program (in Tera Term: Setup → Serial port → Transmit delay, '
+  'msec/line).')
 H2('Stopping a program')
 P('**Ctrl-C** stops a running program with `? Break in line n`. It is checked at every line, at every '
   'jump (`GOTO`, `NEXT`, `IF`, ...), while `DELAY` waits and while `LIST` prints. It does not interrupt '
