@@ -13,6 +13,8 @@ Files:
 | `examples/include/boards/TEL0025.bas` | LED names of the Trenz TEL0025 |
 | `examples/hello_litex.bas` | `PRINT`, `INPUT` and LEDs |
 | `examples/delay_litex.bas` | measures `DELAY_MS` with `TIMER0` |
+| `examples/include/CPU/LITEX_VEXRISCV_IRQ.bas` | interrupts on the VexRiscv CPU: `IrqEnable`, `IrqDisable`, `IrqOn`, `IrqOff` |
+| `examples/timer_litex.bas` | `TIMER0` interrupt with `ON IRQ MEXT` |
 | `tests/check_litex.py` | checks the script and compiles the LiteX examples |
 
 `LITEX.bas` is not in the repository: it belongs to one LiteX build. It is used like the other
@@ -36,7 +38,8 @@ python tools/litex2bas.py build/<board>/csr.json -o examples/include/CPU/LITEX.b
 It declares `TARGET` (from the CPU: `RV32I+M` for the default VexRiscv), `CLOCK`, `CODE`, `RAM`
 and one `DEVICE` for each module of the SoC: `UART0`, `TIMER0`, `CTRL`, `LEDS`, ... with all its
 registers. For each device a `CONST LITEX_<name>` is defined, to test with
-`#IF DEFINED(LITEX_LEDS)`.
+`#IF DEFINED(LITEX_LEDS)`, and `CONST IRQ_<name>` with its interrupt number if it has one.
+`CONST LITEX_CLOCK` is the clock in Hz.
 
 | Option | Meaning |
 |---|---|
@@ -109,6 +112,44 @@ python3 -m litex_boards.targets.trenz_tel0025 --build --load --integrated-main-r
 
 Other boards work the same way with their own LiteX target.
 
+## Interrupts (VexRiscv)
+
+`ON IRQ` works on LiteX with the default VexRiscv CPU without a change to the compiler:
+VexRiscv has `mtvec`, `mepc`, `mcause` and `mstatus` as in the RISC-V standard, and the
+interrupt return of RiscBasic without `mret` (specification, section 7) works on it.
+
+All interrupts of the SoC (timer, UART, ...) arrive as the machine external interrupt, so a
+program has one handler, `ON IRQ MEXT`, that tests the `EV_PENDING` register of each module.
+Three switches must be on:
+
+```basic
+.include "include/CPU/LITEX_VEXRISCV_IRQ.bas"
+
+ON IRQ MEXT
+  IF TIMER0.EV_PENDING.0 THEN
+    TIMER0.EV_PENDING = 1        ' clear the event first
+    ticks = ticks + 1
+  END IF
+END IRQ
+
+TIMER0.EV_ENABLE = 1             ' 1: the module raises its interrupt
+IrqEnable IRQ_TIMER0             ' 2: VexRiscv lets this interrupt through (its CSR 0xBC0)
+IrqOn                            ' 3: mie.MEIE and mstatus.MIE
+```
+
+`examples/timer_litex.bas` is the complete program: 100 interrupts per second from
+`TIMER0`, uptime printed once per second (`-D TICK_HZ=10000` for another rate). Tested in
+`litex_sim` and on the TEL0025: 10 s of uptime in 10.00 s, and 10000 interrupts per second for
+30 s while the main program prints.
+
+The Efinix Sapphire SoC is a VexRiscv too, but with the CLINT timer (`ON IRQ MTIMER`, see
+`include/CPU/SAPPHIRE_CLINT.bas`). The default VexRiscv of LiteX has no CLINT: the LiteX timer
+is a module of the SoC and its interrupt is an external interrupt.
+
+`include/CPU/LITEX_VEXRISCV_IRQ.bas` is for VexRiscv only. Other LiteX CPUs enable their interrupts in
+another way (PicoRV32 has its own instructions; SERV in LiteX has no interrupts); they are
+not tested.
+
 ## Notes
 
 - `CODE` in `main_ram` and variables in `sram`: the BIOS no longer runs when the program has
@@ -117,4 +158,4 @@ Other boards work the same way with their own LiteX target.
   loop, where the compiler counts 2. This would be `CPI 1.5`; `CPI` is a whole number, so with
   the default (`CPI 1`) a delay is 1.5 times too long (measured on the TEL0025 with
   `examples/delay_litex.bas`: `DELAY_MS 100` takes 150 ms). `TIMER0` gives exact times.
-- Interrupts and other CPUs than VexRiscv are not tested here.
+- Other CPUs than VexRiscv are not tested.
